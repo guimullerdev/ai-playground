@@ -1,0 +1,10 @@
+{
+  "name": "beeai-fase-one",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "bee-agent-framework": "^0.1.2"
+  }
+}
