@@ -1,2 +1,5 @@
 anthropic
 rich
+fastapi
+uvicorn
+aiofiles
