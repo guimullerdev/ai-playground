@@ -1,15 +1,12 @@
 import sys
 import os
-import json
 
-# Make project root importable from anywhere
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _APP = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, _APP)
 
-from anthropic import Anthropic
-
+from backend import get_backend
 from agents.assistant import ASSISTANT_NAME, ASSISTANT_DESCRIPTION, ASSISTANT_SYSTEM_PROMPT
 from agents.creative import CREATIVE_NAME, CREATIVE_DESCRIPTION, CREATIVE_SYSTEM_PROMPT
 from agents.critic import CRITIC_NAME, CRITIC_DESCRIPTION, CRITIC_SYSTEM_PROMPT
@@ -58,58 +55,26 @@ def pick_agent(prompt: str = "Choose an agent (1-3): ") -> dict:
         console.print("[red]Invalid choice, try again.[/red]")
 
 
-def run_agent_turn(client: Anthropic, agent: dict, histories: dict) -> str:
-    """Agentic loop: runs until the model stops calling tools and returns the final reply."""
+def run_agent_turn(backend, agent: dict, histories: dict) -> str:
+    """Synchronous agentic loop via backend. Returns the final reply text."""
     messages = histories[agent["name"]]
 
-    while True:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=agent["system"],
-            tools=TOOLS,
-            messages=messages,
-        )
+    # The backend.chat() runs the full agentic loop, appending to messages in-place.
+    # We hook tool display by wrapping tool_fns with print calls.
+    def _wrap(name, fn):
+        def _wrapped(**kwargs):
+            print_tool_call(name, kwargs)
+            result = fn(**kwargs)
+            print_tool_result(name, result)
+            return result
+        return _wrapped
 
-        text_parts = []
-        tool_calls = []
-        for block in response.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-            elif block.type == "tool_use":
-                tool_calls.append(block)
-
-        if tool_calls:
-            # Append the full assistant turn (may include text + tool_use blocks)
-            messages.append({"role": "assistant", "content": response.content})
-
-            tool_results = []
-            for tc in tool_calls:
-                print_tool_call(tc.name, tc.input)
-                fn = TOOL_FNS.get(tc.name)
-                if fn:
-                    result = fn(**tc.input)
-                else:
-                    result = {"ok": False, "data": None, "error": f"Unknown tool: {tc.name}"}
-                print_tool_result(tc.name, result)
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": json.dumps(result),
-                    }
-                )
-
-            messages.append({"role": "user", "content": tool_results})
-            continue  # get the model's reply after seeing tool results
-
-        # Final text response — no more tool calls
-        messages.append({"role": "assistant", "content": response.content})
-        return "\n".join(text_parts)
+    wrapped_fns = {name: _wrap(name, fn) for name, fn in TOOL_FNS.items()}
+    return backend.chat(agent["system"], messages, TOOLS, wrapped_fns)
 
 
 def main():
-    client = Anthropic()
+    backend = get_backend()
     histories = {a["name"]: [] for a in AGENTS}
 
     print_welcome()
@@ -148,7 +113,7 @@ def main():
         histories[current["name"]].append({"role": "user", "content": user_input})
 
         with console.status(f"[dim]{current['name']} is thinking…[/dim]"):
-            reply = run_agent_turn(client, current, histories)
+            reply = run_agent_turn(backend, current, histories)
 
         print_agent_message(current["name"], reply)
 
