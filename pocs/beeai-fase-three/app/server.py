@@ -1,7 +1,6 @@
 import sys
 import os
 import json
-import asyncio
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
@@ -10,8 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from anthropic import AsyncAnthropic
 
+from backend import get_backend
 from agents.assistant import ASSISTANT_NAME, ASSISTANT_DESCRIPTION, ASSISTANT_SYSTEM_PROMPT
 from agents.creative import CREATIVE_NAME, CREATIVE_DESCRIPTION, CREATIVE_SYSTEM_PROMPT
 from agents.critic import CRITIC_NAME, CRITIC_DESCRIPTION, CRITIC_SYSTEM_PROMPT
@@ -21,7 +20,6 @@ from tools.calculator import calculate, CALCULATOR_TOOL_SCHEMA
 from tools.summarizer import summarize_text, SUMMARIZER_TOOL_SCHEMA
 
 app = FastAPI()
-client = AsyncAnthropic()
 
 AGENTS = {
     ASSISTANT_NAME: {"name": ASSISTANT_NAME, "description": ASSISTANT_DESCRIPTION, "system": ASSISTANT_SYSTEM_PROMPT},
@@ -38,7 +36,7 @@ TOOL_FNS = {
     "summarize_text": summarize_text,
 }
 
-# In-memory histories per agent (demo: single shared session)
+# In-memory histories per agent (OpenAI message format)
 histories: dict = {name: [] for name in AGENTS}
 
 
@@ -55,49 +53,9 @@ async def run_chat_stream(agent_name: str, user_message: str):
     messages = histories[agent_name]
     messages.append({"role": "user", "content": user_message})
 
-    while True:
-        full_text = ""
-        collected_blocks = []
-
-        async with client.messages.stream(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=agent["system"],
-            tools=TOOLS,
-            messages=messages,
-        ) as stream:
-            async for text in stream.text_stream:
-                full_text += text
-                yield _sse({"type": "text_delta", "content": text})
-
-            final = await stream.get_final_message()
-
-        tool_calls = [b for b in final.content if b.type == "tool_use"]
-
-        if not tool_calls:
-            messages.append({"role": "assistant", "content": final.content})
-            yield _sse({"type": "done"})
-            break
-
-        # Has tool calls — execute them and loop
-        messages.append({"role": "assistant", "content": final.content})
-        tool_results = []
-
-        for tc in tool_calls:
-            yield _sse({"type": "tool_call", "name": tc.name, "input": tc.input})
-            fn = TOOL_FNS.get(tc.name)
-            if fn:
-                result = await asyncio.to_thread(fn, **tc.input)
-            else:
-                result = {"ok": False, "data": None, "error": f"Unknown tool: {tc.name}"}
-            yield _sse({"type": "tool_result", "name": tc.name, "ok": result["ok"], "error": result.get("error")})
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tc.id,
-                "content": json.dumps(result),
-            })
-
-        messages.append({"role": "user", "content": tool_results})
+    backend = get_backend()
+    async for event in backend.stream(agent["system"], messages, TOOLS, TOOL_FNS):
+        yield _sse(event)
 
 
 @app.get("/agents")
@@ -122,14 +80,10 @@ def get_history(agent_name: str):
         raise HTTPException(status_code=404, detail="Agent not found")
     readable = []
     for msg in histories[agent_name]:
-        if msg["role"] == "user" and isinstance(msg["content"], str):
-            readable.append({"role": "user", "content": msg["content"]})
-        elif msg["role"] == "assistant":
-            content = msg["content"]
-            if isinstance(content, list):
-                text = " ".join(b.text for b in content if hasattr(b, "text"))
-                if text:
-                    readable.append({"role": "assistant", "content": text})
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content:
+            readable.append({"role": role, "content": content})
     return readable
 
 
