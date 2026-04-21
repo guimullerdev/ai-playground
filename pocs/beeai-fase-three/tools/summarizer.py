@@ -1,4 +1,8 @@
-from anthropic import Anthropic
+import sys
+import os
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 SUMMARIZER_TOOL_SCHEMA = {
     "name": "summarize_text",
@@ -23,15 +27,11 @@ _SYSTEM_PROMPT = (
 
 
 def summarize_text(text: str) -> dict:
-    """Calls a second agent (multi-agent orchestration) to summarize the given text."""
-    client = Anthropic()
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=300,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"Summarize this:\n\n{text}"}],
-    )
-    summary = response.content[0].text
+    """Calls the configured backend (multi-agent orchestration) to summarize the given text."""
+    from backend import get_backend
+    backend = get_backend()
+    messages = [{"role": "user", "content": f"Summarize this:\n\n{text}"}]
+    summary = backend.chat(_SYSTEM_PROMPT, messages, [], {})
     return {
         "ok": True,
         "data": {"original_length": len(text), "summary": summary},
