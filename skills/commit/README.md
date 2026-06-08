@@ -1,6 +1,6 @@
 # git-commit skill
 
-A Claude skill that analyzes your repository context and produces well-formatted git commit messages, then executes the commit after your approval.
+A Claude skill that analyzes your repository context and produces well-formatted git commit messages, then executes the commit after your approval. Every decision point uses Claude Code's native selection UI — arrow keys, Enter to confirm, no typing required.
 
 ---
 
@@ -8,13 +8,52 @@ A Claude skill that analyzes your repository context and produces well-formatted
 
 When triggered, the skill:
 
-1. Scans all changed files and, if changes span multiple folders or subprojects, asks which one you want to commit — all subsequent steps are scoped to that selection
-2. Reads your current branch, diff, and recent log for the selected scope
+1. Scans all changed files and groups them by project/folder — if changes span multiple scopes, presents a selection UI so you pick which one to commit
+2. Reads the branch name, diff, and recent log for the selected scope
 3. Extracts a Jira-style ticket ID from the branch name (if present)
-4. Asks whether you want a single commit or multiple split by type of change
+4. Asks how you want to group the commit (single, split by type, or custom)
 5. Picks the right verb based on what actually happened (new files → `Implemented`, edits → `Updated`, deletions → `Removed`, etc.)
-6. Suggests a formatted commit message and waits for your approval
-7. Runs `git add` + `git commit` only after you confirm
+6. Suggests a formatted commit message and presents options to confirm, edit, or change the verb
+7. Runs `git add` + `git commit` only after you confirm — for split commits, asks between each one
+
+---
+
+## Interactive UI at every step
+
+All choices are presented as native Claude Code selections — no open-ended questions:
+
+**Scope selection** (when changes span multiple folders):
+```
+1. pocs/beeai-fase-three/
+   Modified app files + new agents/orchestrator.py and tools/agent_tools.py
+2. pocs/beeai-fase-two/
+   New untracked folder
+3. .gitignore + .claude/
+   New config/ignore files
+4. All folders (*)
+```
+
+**Commit grouping:**
+```
+1. Single commit — everything in one commit
+2. Split commits — separate new files from modifications
+3. Let me decide — show me the files and I'll choose the grouping
+```
+
+**Message approval:**
+```
+1. Yes, commit now
+2. Edit the message — I'll retype it
+3. Change the verb
+4. Cancel
+```
+
+**Between split commits:**
+```
+1. Yes, commit this one too
+2. Skip this commit
+3. Stop here
+```
 
 ---
 
@@ -65,10 +104,8 @@ I'm ready to commit
 
 ## Allowed git commands
 
-The skill operates with a strict allowlist to prevent accidental data loss.
-
 **Read-only (always safe to run):**
-- `git status`, `git diff`, `git diff HEAD`, `git diff --staged`
+- `git status`, `git diff`, `git diff HEAD -- <path>`, `git diff --staged`
 - `git branch --show-current`, `git branch -a`
 - `git log --oneline` (up to 20 entries)
 - `git show --stat HEAD`
