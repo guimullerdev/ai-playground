@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Code Review Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e0e2f0;
+      --muted: #6b7090;
+      --accent: #5c7cfa;
+      --critical: #ff4d4d;
+      --warning: #ffaa00;
+      --info: #4d9fff;
+      --success: #3ecf8e;
+      --font: 'Courier New', Courier, monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    header h1 {
+      font-size: 14px;
+      font-weight: normal;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+    .status-dot.connecting { background: var(--warning); }
+    .status-dot.connected  { background: var(--success); }
+
+    .main {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* LEFT PANEL */
+    .left {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    textarea {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 10px;
+      resize: none;
+      outline: none;
+      line-height: 1.6;
+    }
+    textarea:focus { border-color: var(--accent); }
+
+    button {
+      font-family: var(--font);
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      transition: opacity 0.2s;
+    }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    #btn-run {
+      background: var(--accent);
+      color: #fff;
+      width: 100%;
+      padding: 10px;
+    }
+    #btn-run:not(:disabled):hover { opacity: 0.85; }
+
+    /* RIGHT PANEL */
+    .right {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .stream-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    #btn-clear {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 3px 8px;
+      font-size: 10px;
+    }
+    #btn-clear:hover { color: var(--text); border-color: var(--muted); }
+
+    #stream {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* Stream entries */
+    .entry { line-height: 1.7; }
+
+    .entry.agent-header {
+      margin-top: 10px;
+      color: var(--accent);
+      font-weight: bold;
+      border-left: 2px solid var(--accent);
+      padding-left: 8px;
+    }
+
+    .entry.thinking {
+      color: var(--muted);
+      padding-left: 16px;
+    }
+    .entry.thinking::before { content: '💭 '; }
+
+    .entry.handoff {
+      color: var(--muted);
+      padding-left: 16px;
+    }
+    .entry.handoff::before { content: '→ '; }
+
+    .entry.tool-start {
+      color: var(--muted);
+      padding-left: 16px;
+      font-style: italic;
+    }
+    .entry.tool-start::before { content: '⚙ '; }
+
+    .entry.tool-end {
+      color: var(--muted);
+      padding-left: 24px;
+      font-size: 11px;
+    }
+
+    .entry.finding { padding-left: 16px; font-weight: bold; }
+    .entry.finding.critical { color: var(--critical); }
+    .entry.finding.critical::before { content: '🔴 '; }
+    .entry.finding.warning  { color: var(--warning); }
+    .entry.finding.warning::before  { content: '🟡 '; }
+    .entry.finding.info     { color: var(--info); }
+    .entry.finding.info::before     { content: 'ℹ️ '; }
+    .entry.finding.none { color: var(--text); }
+    .entry.finding.none::before { content: '• '; }
+
+    /* Approval banner */
+    #approval-banner {
+      display: none;
+      margin: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--warning);
+      border-radius: 6px;
+      padding: 14px 16px;
+      gap: 12px;
+      flex-direction: column;
+    }
+    #approval-banner.visible { display: flex; }
+
+    .approval-title {
+      color: var(--warning);
+      font-size: 12px;
+    }
+    .approval-title::before { content: '👤 '; }
+
+    .approval-buttons { display: flex; gap: 8px; }
+
+    #btn-approve {
+      background: var(--success);
+      color: #000;
+      flex: 1;
+    }
+    #btn-approve:hover { opacity: 0.85; }
+
+    #btn-reject {
+      background: var(--critical);
+      color: #fff;
+      flex: 1;
+    }
+    #btn-reject:hover { opacity: 0.85; }
+
+    /* Verdict box */
+    #verdict-box {
+      display: none;
+      margin: 0 16px 12px;
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 0.05em;
+    }
+    #verdict-box.visible { display: block; }
+    #verdict-box.approved      { background: #1a3a2a; color: var(--success); border: 1px solid var(--success); }
+    #verdict-box.changes       { background: #3a2f1a; color: var(--warning); border: 1px solid var(--warning); }
+    #verdict-box.blocked       { background: #3a1a1a; color: var(--critical); border: 1px solid var(--critical); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot" id="status-dot"></div>
+  <h1>Code Review Demo</h1>
+</header>
+
+<div class="main">
+  <div class="left">
+    <label for="code-input">Code to review</label>
+    <textarea id="code-input" spellcheck="false">def authenticate(username, password):
+    query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
+    result = db.execute(query)
+    eval(result["callback"])
+    return result</textarea>
+    <button id="btn-run">Run Review</button>
+  </div>
+
+  <div class="right">
+    <div class="stream-header">
+      <span>Agent Stream</span>
+      <button id="btn-clear">clear</button>
+    </div>
+    <div id="stream"></div>
+    <div id="approval-banner">
+      <div class="approval-title">Human approval required before finalizing verdict</div>
+      <div class="approval-buttons">
+        <button id="btn-approve">Approve</button>
+        <button id="btn-reject">Reject</button>
+      </div>
+    </div>
+    <div id="verdict-box"></div>
+  </div>
+</div>
+
+<script>
+  const BASE_URL = 'http://localhost:8000';
+
+  const btnRun      = document.getElementById('btn-run');
+  const btnClear    = document.getElementById('btn-clear');
+  const btnApprove  = document.getElementById('btn-approve');
+  const btnReject   = document.getElementById('btn-reject');
+  const codeInput   = document.getElementById('code-input');
+  const stream      = document.getElementById('stream');
+  const statusDot   = document.getElementById('status-dot');
+  const approvalBanner = document.getElementById('approval-banner');
+  const verdictBox  = document.getElementById('verdict-box');
+
+  // State: idle | connecting | reviewing | awaiting_approval | done
+  let state = 'idle';
+  let ws = null;
+
+  function setState(s) {
+    state = s;
+    btnRun.disabled = (s !== 'idle' && s !== 'done');
+    approvalBanner.classList.toggle('visible', s === 'awaiting_approval');
+
+    statusDot.className = 'status-dot';
+    if (s === 'connecting') statusDot.classList.add('connecting');
+    if (s === 'reviewing' || s === 'awaiting_approval') statusDot.classList.add('connected');
+  }
+
+  function appendEntry(cls, text) {
+    const div = document.createElement('div');
+    div.className = 'entry ' + cls;
+    div.textContent = text;
+    stream.appendChild(div);
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function handleEvent(evt) {
+    switch (evt.type) {
+      case 'agent.start':
+        appendEntry('agent-header', `[${evt.agent}] ${evt.message}`);
+        break;
+      case 'agent.thinking':
+        appendEntry('thinking', evt.message);
+        break;
+      case 'agent.handoff':
+        appendEntry('handoff', evt.message);
+        break;
+      case 'tool.start':
+        appendEntry('tool-start', evt.message);
+        break;
+      case 'tool.end':
+        appendEntry('tool-end', evt.message);
+        break;
+      case 'finding': {
+        const sev = evt.severity || 'none';
+        appendEntry(`finding ${sev}`, evt.message);
+        break;
+      }
+      case 'human_approval':
+        appendEntry('agent-header', `[${evt.agent}] ${evt.message}`);
+        setState('awaiting_approval');
+        break;
+      case 'verdict':
+        showVerdict(evt.message);
+        setState('done');
+        if (ws) { ws.close(); ws = null; }
+        break;
+    }
+  }
+
+  function showVerdict(message) {
+    verdictBox.textContent = 'VERDICT: ' + message;
+    verdictBox.className = 'verdict-box visible';
+    const upper = message.toUpperCase();
+    if (upper.includes('APPROVED')) verdictBox.classList.add('approved');
+    else if (upper.includes('CHANGES')) verdictBox.classList.add('changes');
+    else verdictBox.classList.add('blocked');
+    verdictBox.id = 'verdict-box'; // keep id intact
+    verdictBox.style.display = 'block';
+  }
+
+  async function runReview() {
+    const code = codeInput.value.trim();
+    if (!code) return;
+
+    // reset UI
+    stream.innerHTML = '';
+    verdictBox.className = '';
+    verdictBox.style.display = 'none';
+    verdictBox.textContent = '';
+
+    setState('connecting');
+
+    ws = new WebSocket(`${BASE_URL.replace('http', 'ws')}/ws`);
+
+    ws.onopen = async () => {
+      setState('reviewing');
+      try {
+        const res = await fetch(`${BASE_URL}/review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        if (!res.ok) throw new Error(`POST /review failed: ${res.status}`);
+      } catch (err) {
+        appendEntry('finding critical', `Error: ${err.message}`);
+        setState('idle');
+        ws.close();
+      }
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data);
+        handleEvent(evt);
+      } catch {
+        appendEntry('tool-end', e.data);
+      }
+    };
+
+    ws.onerror = () => {
+      appendEntry('finding critical', 'WebSocket error — is the backend running?');
+      setState('idle');
+    };
+
+    ws.onclose = () => {
+      statusDot.className = 'status-dot';
+    };
+  }
+
+  async function sendApproval(approved) {
+    setState('reviewing');
+    await fetch(`${BASE_URL}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved }),
+    });
+  }
+
+  btnRun.addEventListener('click', runReview);
+  btnClear.addEventListener('click', () => { stream.innerHTML = ''; });
+  btnApprove.addEventListener('click', () => sendApproval(true));
+  btnReject.addEventListener('click', () => sendApproval(false));
+</script>
+</body>
+</html>
