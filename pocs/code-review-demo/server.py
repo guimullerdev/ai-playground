@@ -1,5 +1,9 @@
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from opentelemetry import trace
 from pydantic import BaseModel
 
 from agents.dev_agent import create_dev_agent
@@ -9,8 +13,26 @@ from agents.lead_agent import create_lead_agent, run_lead_with_approval
 from agents.orchestrator import create_orchestrator
 from core.event_bridge import attach_bridge
 from core.models import ReviewEvent
+from core.telemetry import setup_telemetry
 
 app = FastAPI()
+setup_telemetry(app)
+
+tracer = trace.get_tracer("code-review-demo")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/ui", StaticFiles(directory="ui"), name="ui")
+
+
+@app.get("/")
+async def root():
+    return FileResponse("ui/index.html")
 
 _active_ws: WebSocket | None = None
 _approval_event: asyncio.Event = asyncio.Event()
@@ -56,23 +78,29 @@ async def _ws_send(message: str) -> None:
 
 
 async def _run_pipeline(code: str) -> None:
-    dev = create_dev_agent()
-    security = create_security_agent()
-    perf = create_perf_agent()
-    lead = create_lead_agent()
-    orchestrator = create_orchestrator(dev, security, perf)
+    with tracer.start_as_current_span("review.pipeline") as pipeline_span:
+        pipeline_span.set_attribute("code.length", len(code))
 
-    for agent, name in [(orchestrator, "orchestrator"), (dev, "dev"), (security, "security"), (perf, "perf")]:
-        await attach_bridge(agent, _ws_send, name)
+        dev = create_dev_agent()
+        security = create_security_agent()
+        perf = create_perf_agent()
+        lead = create_lead_agent()
+        orchestrator = create_orchestrator(dev, security, perf)
 
-    await _ws_send(ReviewEvent(type="agent.start", agent="orchestrator", message="Starting review pipeline", severity=None).to_json())
+        for agent, name in [(orchestrator, "orchestrator"), (dev, "dev"), (security, "security"), (perf, "perf")]:
+            await attach_bridge(agent, _ws_send, name)
 
-    result = await orchestrator.run(f"Review this code:\n\n{code}")
-    findings = result.output.text
+        await _ws_send(ReviewEvent(type="agent.start", agent="orchestrator", message="Starting review pipeline", severity=None).to_json())
 
-    await _ws_send(ReviewEvent(type="agent.start", agent="lead", message="Consolidating findings", severity=None).to_json())
-    await attach_bridge(lead, _ws_send, "lead")
+        with tracer.start_as_current_span("agent.orchestrator"):
+            result = await orchestrator.run(f"Review this code:\n\n{code}")
+        findings = result.output.text
 
-    verdict = await run_lead_with_approval(lead, findings, _ws_send, _approval_event)
+        await _ws_send(ReviewEvent(type="agent.start", agent="lead", message="Consolidating findings", severity=None).to_json())
+        await attach_bridge(lead, _ws_send, "lead")
 
-    await _ws_send(ReviewEvent(type="verdict", agent="lead", message=verdict, severity=None).to_json())
+        with tracer.start_as_current_span("agent.lead"):
+            verdict = await run_lead_with_approval(lead, findings, _ws_send, _approval_event)
+
+        pipeline_span.set_attribute("review.verdict", verdict)
+        await _ws_send(ReviewEvent(type="verdict", agent="lead", message=verdict, severity=None).to_json())
