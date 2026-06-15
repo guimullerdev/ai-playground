@@ -9,9 +9,9 @@ def create_orchestrator(dev_agent, security_agent, perf_agent) -> RequirementAge
         llm=get_llm(),
         memory=UnconstrainedMemory(),
         tools=[
-            HandoffTool(agent=dev_agent, name="handoff_dev"),
-            HandoffTool(agent=security_agent, name="handoff_security"),
-            HandoffTool(agent=perf_agent, name="handoff_perf"),
+            HandoffTool(target=dev_agent, name="handoff_dev"),
+            HandoffTool(target=security_agent, name="handoff_security"),
+            HandoffTool(target=perf_agent, name="handoff_perf"),
         ],
         role="orchestrator",
         instructions=(

@@ -6,12 +6,6 @@ services:
       - "4318:4318"     # OTLP HTTP receiver
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-      SPAN_STORAGE_TYPE: badger
-      BADGER_EPHEMERAL: "false"
-      BADGER_DIRECTORY_VALUE: /badger/data
-      BADGER_DIRECTORY_KEY: /badger/key
-    volumes:
-      - jaeger_data:/badger
 
   api:
     build: .
@@ -25,6 +19,3 @@ services:
     depends_on:
       - jaeger
     restart: unless-stopped
-
-volumes:
-  jaeger_data:

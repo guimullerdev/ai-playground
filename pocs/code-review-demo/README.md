@@ -144,6 +144,47 @@ Expected output:
 - **Performance:** no major issues
 - **Lead:** requests human approval → **BLOCKED**
 
+## Tests
+
+The test suite is hermetic — every external dependency (LLM, BeeAI runtime, OTel exporters) is mocked. Tests run inside the Docker container where all packages are installed.
+
+### Run
+
+```bash
+# inside the running container
+docker compose exec api pytest
+
+# with verbose output
+docker compose exec api pytest -v
+
+# single file
+docker compose exec api pytest tests/test_models.py
+```
+
+### Structure
+
+```
+tests/
+├── conftest.py          # shared fixtures: mock_llm, mock_agent, ws_send, approval_event
+├── test_models.py       # ReviewEvent serialization and field validation
+├── test_event_bridge.py # _map_event (pure) + attach_bridge (async emitter integration)
+├── test_backend.py      # get_llm env-var behaviour, ChatModel.from_name patched
+├── test_telemetry.py    # setup_telemetry: no-op path + provider/instrumentor wiring
+├── test_agents.py       # factory functions — asserts constructor kwargs, no LLM calls
+├── test_lead_agent.py   # run_lead_with_approval: approval gating and output pass-through
+└── test_server.py       # FastAPI HTTP + WebSocket endpoints via httpx AsyncClient
+```
+
+### Design
+
+| Layer | Strategy |
+|---|---|
+| LLM | `ChatModel.from_name` patched — no network calls |
+| BeeAI agents | `RequirementAgent`, `HandoffTool`, etc. replaced with `MagicMock` — only constructor kwargs asserted |
+| OTel exporters | `OTLPSpanExporter`, `FastAPIInstrumentor`, `HTTPXClientInstrumentor` all patched |
+| Approval gate | Real `asyncio.Event`; timeout guard (`asyncio.wait_for`) verifies the coroutine blocks |
+| WebSocket | `starlette.TestClient` for connection/disconnect; `AsyncMock` for `_ws_send` unit test |
+
 ## Local Development (without Docker)
 
 ```bash

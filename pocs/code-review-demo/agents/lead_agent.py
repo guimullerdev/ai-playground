@@ -39,4 +39,4 @@ async def run_lead_with_approval(
     await approval_event.wait()
 
     result = await lead_agent.run(findings)
-    return result.output.text
+    return result.last_message.text

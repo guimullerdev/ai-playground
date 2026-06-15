@@ -384,6 +384,12 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code }),
         });
+        if (res.status === 409) {
+          appendEntry('finding warning', 'A review is already in progress — wait for it to finish.');
+          setState('idle');
+          ws.close();
+          return;
+        }
         if (!res.ok) throw new Error(`POST /review failed: ${res.status}`);
       } catch (err) {
         appendEntry('finding critical', `Error: ${err.message}`);

@@ -1,10 +1,21 @@
 from typing import Callable, Awaitable
+from opentelemetry import trace
 from core.models import ReviewEvent
 
 
 async def attach_bridge(agent, ws_send: Callable[[str], Awaitable[None]], agent_name: str) -> None:
     @agent.emitter.on("*.*")
     async def handle(data, event):
+        # Record every BeeAI event onto the currently active OTel span
+        span = trace.get_current_span()
+        span.add_event(
+            event.name,
+            attributes={
+                "agent": agent_name,
+                "data": str(data)[:2000],
+            },
+        )
+
         review_event = _map_event(event.name, data, agent_name)
         if review_event:
             await ws_send(review_event.to_json())
