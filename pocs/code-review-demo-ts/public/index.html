@@ -1,0 +1,1590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Code Review Agent</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-dim: #6e7681;
+      --text-bright: #f0f6fc;
+
+      --c-orchestrator: #a371f7;
+      --c-dev: #f0883e;
+      --c-security: #f85149;
+      --c-perf: #3fb950;
+      --c-lead: #58a6ff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-bright);
+    }
+
+    .pill {
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      letter-spacing: 0.04em;
+    }
+    .pill-bee { background: rgba(163,113,247,0.15); color: #a371f7; border: 1px solid rgba(163,113,247,0.3); }
+
+    .ws-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .ws-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.3s;
+    }
+    .ws-dot.connected { background: #3fb950; }
+    .ws-dot.reviewing { background: #f0883e; animation: glow 1s infinite; }
+
+    /* ── Layout ── */
+    main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Left panel ── */
+    #left-panel {
+      width: 42%;
+      min-width: 300px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    /* Left panel header: label + chips */
+    #left-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .panel-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .panel-label .spinner {
+      display: none;
+      width: 10px; height: 10px;
+      border: 1.5px solid rgba(255,255,255,0.15);
+      border-top-color: var(--c-lead);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .panel-label.reviewing .spinner { display: inline-block; }
+
+    #severity-chips {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+    }
+
+    .sev-chip {
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 999px;
+    }
+    .sev-chip.critical { background: rgba(248,81,73,0.15); color: #f85149; border: 1px solid rgba(248,81,73,0.3); }
+    .sev-chip.warning  { background: rgba(210,153,34,0.15); color: #d29922; border: 1px solid rgba(210,153,34,0.3); }
+    .sev-chip.info     { background: rgba(88,166,255,0.15); color: #58a6ff; border: 1px solid rgba(88,166,255,0.3); }
+
+    /* ── Code textarea ── */
+    #code-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-bright);
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.78rem;
+      line-height: 1.65;
+      padding: 12px 14px;
+      resize: none;
+      outline: none;
+      tab-size: 2;
+      transition: border-color 0.2s;
+    }
+    #code-input:focus { border-color: #388bfd; }
+    #code-input::placeholder { color: var(--text-dim); }
+
+    /* ── Code view ── */
+    #code-view {
+      display: none;
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    /* Single column: flex column so the pane fills */
+    #code-view.single {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Diff: side-by-side panes */
+    #code-view.diff {
+      display: flex;
+      flex-direction: row;
+    }
+
+    .code-pane {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: 8px;
+    }
+    .code-pane::-webkit-scrollbar { width: 6px; }
+    .code-pane::-webkit-scrollbar-track { background: transparent; }
+    .code-pane::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .code-pane-header {
+      display: flex;
+      align-items: center;
+      padding: 5px 12px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    #code-after {
+      border-left: 1px solid var(--border);
+      opacity: 0;
+      transform: translateX(12px) scale(0.98);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+    #code-after.visible {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+    #code-after .code-pane-header { color: #3fb950; }
+
+    /* Code lines */
+    .code-line {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 1px 10px 1px 6px;
+      border-left: 3px solid transparent;
+    }
+
+    .line-num {
+      flex-shrink: 0;
+      min-width: 22px;
+      color: var(--text-dim);
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.7rem;
+      text-align: right;
+      user-select: none;
+      line-height: 1.65;
+    }
+
+    .line-gutter {
+      flex-shrink: 0;
+      width: 10px;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.7rem;
+      text-align: center;
+      user-select: none;
+      line-height: 1.65;
+    }
+
+    .line-content {
+      flex: 1;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.78rem;
+      line-height: 1.65;
+      white-space: pre;
+      color: var(--text-bright);
+      overflow: hidden;
+    }
+    .line-content.dimmed { opacity: 0.4; }
+
+    .line-badge {
+      flex-shrink: 0;
+      font-size: 0.6rem;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      cursor: help;
+      align-self: center;
+    }
+
+    .code-line.line-critical { background: rgba(248,81,73,0.1); border-left-color: rgba(248,81,73,0.7); }
+    .code-line.line-warning  { background: rgba(210,153,34,0.08); border-left-color: rgba(210,153,34,0.6); }
+    .code-line.line-info     { background: rgba(88,166,255,0.07); border-left-color: rgba(88,166,255,0.5); }
+    .code-line.line-removed  { background: rgba(248,81,73,0.08); border-left-color: rgba(248,81,73,0.5); }
+    .code-line.line-added    { background: rgba(63,185,80,0.08);  border-left-color: rgba(63,185,80,0.5); }
+
+    /* ── Legend bar ── */
+    #legend-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.7rem;
+      flex-shrink: 0;
+    }
+    #legend-bar.visible { display: flex; }
+
+    .legend-item { display: flex; align-items: center; gap: 4px; color: var(--text-dim); }
+    .legend-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .legend-dot.critical { background: #f85149; }
+    .legend-dot.warning  { background: #d29922; }
+    .legend-dot.info     { background: #58a6ff; }
+
+    #copy-fix-btn {
+      margin-left: auto;
+      font-size: 0.68rem;
+      padding: 3px 8px;
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Buttons ── */
+    .btn-row { display: flex; gap: 8px; flex-shrink: 0; }
+
+    button {
+      border: none;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      padding: 8px 14px;
+      cursor: pointer;
+      transition: filter 0.15s, opacity 0.15s;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.12); }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    #review-btn { background: #238636; color: #fff; flex: 1; }
+    #sample-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    #clear-btn  { background: transparent; color: var(--text-dim); border: 1px solid var(--border); padding: 8px 10px; }
+
+    /* ── Right panel ── */
+    #right-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Pipeline ── */
+    #pipeline {
+      flex-shrink: 0;
+      padding: 10px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pipe-arrow {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    /* Dashed border group for parallel specialists */
+    .parallel-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border: 1.5px dashed var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+
+    .agent-card {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 5px;
+      border: 1.5px solid var(--border);
+      font-size: 0.73rem;
+      font-weight: 500;
+      color: var(--text-dim);
+      transition: all 0.25s ease;
+      cursor: default;
+      user-select: none;
+      background: var(--bg);
+    }
+
+    .agent-state-icon { flex-shrink: 0; font-size: 0.72rem; width: 12px; text-align: center; }
+    .agent-name { flex-shrink: 0; }
+    .agent-elapsed {
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      min-width: 24px;
+    }
+
+    [data-agent="orchestrator"] { --nc: var(--c-orchestrator); }
+    [data-agent="dev"]          { --nc: var(--c-dev); }
+    [data-agent="security"]     { --nc: var(--c-security); }
+    [data-agent="perf"]         { --nc: var(--c-perf); }
+    [data-agent="lead"]         { --nc: var(--c-lead); }
+
+    .agent-card.active {
+      color: var(--text-bright);
+      border-color: var(--nc);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--nc) 15%, transparent),
+                  0 0 8px color-mix(in srgb, var(--nc) 18%, transparent);
+    }
+    .agent-card.active .agent-elapsed { color: var(--nc); }
+
+    .agent-card.done {
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--nc) 50%, transparent);
+      opacity: 0.8;
+    }
+
+    .agent-card.error { color: #f85149; border-color: rgba(248,81,73,0.5); }
+
+    /* ── Filter toolbar ── */
+    #filter-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 7px 12px 5px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .filter-btn {
+      font-size: 0.72rem;
+      font-weight: 500;
+      padding: 4px 10px;
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid transparent;
+      border-radius: 4px;
+    }
+    .filter-btn:hover:not(:disabled) { background: var(--surface2); color: var(--text); filter: none; }
+    .filter-btn.active { background: var(--surface2); color: var(--text-bright); border-color: var(--border); }
+
+    /* ── Event log ── */
+    #event-log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      scroll-behavior: smooth;
+    }
+
+    #event-log::-webkit-scrollbar { width: 6px; }
+    #event-log::-webkit-scrollbar-track { background: transparent; }
+    #event-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      text-align: center;
+      padding: 40px;
+    }
+    .empty-icon { font-size: 2.5rem; opacity: 0.4; }
+
+    /* Standard event row */
+    .event-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 5px;
+    }
+    .event-row.noise { opacity: 0.5; }
+
+    .ev-time {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      flex-shrink: 0;
+      padding-top: 2px;
+      min-width: 54px;
+    }
+
+    .ev-agent-badge {
+      font-size: 0.62rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge-orchestrator { background: rgba(163,113,247,0.15); color: #a371f7; }
+    .badge-dev          { background: rgba(240,136,62,0.15);  color: #f0883e; }
+    .badge-security     { background: rgba(248,81,73,0.15);   color: #f85149; }
+    .badge-perf         { background: rgba(63,185,80,0.15);   color: #3fb950; }
+    .badge-lead         { background: rgba(88,166,255,0.15);  color: #58a6ff; }
+
+    .ev-type-badge {
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .type-agent-start    { background: rgba(163,113,247,0.12); color: #a371f7; }
+    .type-agent-thinking { background: rgba(110,118,129,0.12); color: #8b949e; }
+    .type-agent-handoff  { background: rgba(88,166,255,0.12);  color: #58a6ff; }
+    .type-tool-start     { background: rgba(240,136,62,0.12);  color: #f0883e; }
+    .type-tool-end       { background: rgba(63,185,80,0.12);   color: #3fb950; }
+    .type-finding        { background: rgba(210,153,34,0.12);  color: #d29922; }
+    .type-human-approval { background: rgba(210,153,34,0.15);  color: #d29922; }
+
+    .ev-message {
+      flex: 1;
+      font-size: 0.78rem;
+      line-height: 1.55;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .ev-message.dimmed { color: var(--text-dim); font-style: italic; }
+    .ev-message.collapsible {
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      cursor: pointer;
+    }
+    .ev-message.collapsible.expanded { -webkit-line-clamp: unset; display: block; }
+
+    /* ── Finding card ── */
+    .finding-card {
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      overflow: hidden;
+      animation: fade-slide-in 0.2s ease;
+    }
+
+    @keyframes fade-slide-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .finding-card-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .finding-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      flex: 1;
+    }
+
+    .finding-card-body {
+      padding: 8px 12px;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .finding-card.sev-critical { border-left: 3px solid #f85149; }
+    .finding-card.sev-warning  { border-left: 3px solid #d29922; }
+    .finding-card.sev-info     { border-left: 3px solid #58a6ff; }
+
+    /* ── Section header in findings view ── */
+    .findings-section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 2px 2px;
+    }
+    .findings-section-line { flex: 1; height: 1px; background: var(--border); }
+    .findings-section-label {
+      font-size: 0.63rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+    }
+
+    .severity-badge {
+      display: inline-block;
+      font-size: 0.6rem;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .sev-critical { background: rgba(248,81,73,0.2); color: #f85149; border: 1px solid rgba(248,81,73,0.3); }
+    .sev-warning  { background: rgba(210,153,34,0.2); color: #d29922; border: 1px solid rgba(210,153,34,0.3); }
+    .sev-info     { background: rgba(88,166,255,0.2); color: #58a6ff; border: 1px solid rgba(88,166,255,0.3); }
+
+    /* ── Approval box ── */
+    #approval-box {
+      flex-shrink: 0;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      padding: 13px 16px;
+      background: rgba(210,153,34,0.05);
+      border-top: 1px solid rgba(210,153,34,0.25);
+    }
+    #approval-box.visible {
+      display: flex;
+      animation: slide-up 0.22s ease;
+    }
+
+    @keyframes slide-up {
+      from { transform: translateY(12px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    #approval-summary {
+      font-size: 0.83rem;
+      color: #d29922;
+      font-weight: 500;
+    }
+
+    #findings-panel {
+      overflow-y: auto;
+      background: rgba(0,0,0,0.18);
+      border: 1px solid rgba(210,153,34,0.15);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 0.75rem;
+      line-height: 1.65;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 18vh;
+    }
+    #findings-panel::-webkit-scrollbar { width: 5px; }
+    #findings-panel::-webkit-scrollbar-track { background: transparent; }
+    #findings-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    #approval-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    #approve-btn { background: #238636; color: #fff; }
+    #block-btn   { background: rgba(248,81,73,0.12); color: #f85149; border: 1px solid rgba(248,81,73,0.4); }
+
+    /* ── Verdict modal overlay ── */
+    #verdict-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    #verdict-overlay.visible {
+      display: flex;
+      animation: fade-in 0.18s ease;
+    }
+
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    #verdict-modal {
+      background: var(--surface);
+      border-radius: 10px;
+      width: 430px;
+      max-width: 90vw;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+      animation: modal-in 0.25s ease;
+    }
+
+    @keyframes modal-in {
+      from { transform: translateY(18px) scale(0.97); opacity: 0; }
+      to   { transform: translateY(0)    scale(1);    opacity: 1; }
+    }
+
+    #verdict-modal-header {
+      padding: 16px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      border-top: 3px solid var(--border);
+    }
+    #verdict-modal-header.v-blocked  { border-top-color: #f85149; }
+    #verdict-modal-header.v-changes  { border-top-color: #d29922; }
+    #verdict-modal-header.v-approved { border-top-color: #3fb950; }
+
+    .verdict-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .verdict-modal-icon { font-size: 1.35rem; }
+    .verdict-decision {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    #verdict-modal-header.v-blocked  .verdict-decision { color: #f85149; }
+    #verdict-modal-header.v-changes  .verdict-decision { color: #d29922; }
+    #verdict-modal-header.v-approved .verdict-decision { color: #3fb950; }
+
+    .verdict-meta {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+
+    #verdict-modal-body {
+      padding: 14px 20px;
+      max-height: 38vh;
+      overflow-y: auto;
+    }
+
+    #verdict-bullets {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    #verdict-bullets li {
+      font-size: 0.8rem;
+      line-height: 1.55;
+      color: var(--text);
+      padding-left: 14px;
+      position: relative;
+    }
+    #verdict-bullets li::before {
+      content: '●';
+      position: absolute;
+      left: 0;
+      color: var(--text-dim);
+      font-size: 0.45rem;
+      top: 5px;
+    }
+
+    #verdict-modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      padding: 11px 20px;
+      border-top: 1px solid var(--border);
+    }
+    #verdict-copy-btn    { background: transparent; color: var(--text-dim); border: 1px solid var(--border); font-size: 0.78rem; }
+    #verdict-dismiss-btn { background: var(--surface2); color: var(--text-bright); border: 1px solid var(--border); font-size: 0.78rem; }
+
+    /* ── Syntax highlighting ── */
+    .hl-keyword  { color: #c792ea; }
+    .hl-string   { color: #89ddff; }
+    .hl-comment  { color: #546e7a; font-style: italic; }
+    .hl-number   { color: #f78c6c; }
+    .hl-function { color: #82aaff; }
+
+    /* ── Animations ── */
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 680px) {
+      main { flex-direction: column; }
+      #left-panel { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border); height: 42vh; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Code Review Agent</h1>
+  <span class="pill pill-bee">BeeAI</span>
+  <div class="ws-status">
+    <div class="ws-dot" id="ws-dot"></div>
+    <span id="ws-label">Connecting…</span>
+  </div>
+</header>
+
+<main>
+  <!-- Left: code input / review view -->
+  <div id="left-panel">
+    <div id="left-panel-header">
+      <span class="panel-label" id="code-panel-label">
+        <span class="spinner"></span>
+        <span id="panel-label-text">Code to review</span>
+      </span>
+      <div id="severity-chips">
+        <span class="sev-chip critical" id="chip-critical" style="display:none"></span>
+        <span class="sev-chip warning"  id="chip-warning"  style="display:none"></span>
+        <span class="sev-chip info"     id="chip-info"     style="display:none"></span>
+      </div>
+    </div>
+
+    <textarea id="code-input" spellcheck="false" placeholder="Paste your code here…"></textarea>
+
+    <div id="code-view">
+      <div class="code-pane" id="code-before"></div>
+    </div>
+
+    <div id="legend-bar">
+      <div class="legend-item"><div class="legend-dot critical"></div><span id="legend-critical">0 critical</span></div>
+      <div class="legend-item"><div class="legend-dot warning"></div><span id="legend-warning">0 warning</span></div>
+      <div class="legend-item"><div class="legend-dot info"></div><span id="legend-info">0 info</span></div>
+      <button id="copy-fix-btn">Copy fix ↗</button>
+    </div>
+
+    <div class="btn-row">
+      <button id="sample-btn" title="Load example code with intentional issues">Load sample</button>
+      <button id="clear-btn" title="Clear">✕</button>
+      <button id="review-btn" disabled>▶ Start review</button>
+    </div>
+  </div>
+
+  <!-- Right: pipeline + events + approval -->
+  <div id="right-panel">
+
+    <!-- Pipeline visualization -->
+    <div id="pipeline">
+      <div class="agent-card" data-agent="orchestrator">
+        <span class="agent-state-icon" id="icon-orchestrator">○</span>
+        <span class="agent-name">Orchestrator</span>
+        <span class="agent-elapsed" id="elapsed-orchestrator"></span>
+      </div>
+      <span class="pipe-arrow">→</span>
+      <div class="parallel-group">
+        <div class="agent-card" data-agent="dev">
+          <span class="agent-state-icon" id="icon-dev">○</span>
+          <span class="agent-name">Dev</span>
+          <span class="agent-elapsed" id="elapsed-dev"></span>
+        </div>
+        <div class="agent-card" data-agent="security">
+          <span class="agent-state-icon" id="icon-security">○</span>
+          <span class="agent-name">Security</span>
+          <span class="agent-elapsed" id="elapsed-security"></span>
+        </div>
+        <div class="agent-card" data-agent="perf">
+          <span class="agent-state-icon" id="icon-perf">○</span>
+          <span class="agent-name">Perf</span>
+          <span class="agent-elapsed" id="elapsed-perf"></span>
+        </div>
+      </div>
+      <span class="pipe-arrow">→</span>
+      <div class="agent-card" data-agent="lead">
+        <span class="agent-state-icon" id="icon-lead">○</span>
+        <span class="agent-name">Lead</span>
+        <span class="agent-elapsed" id="elapsed-lead"></span>
+      </div>
+    </div>
+
+    <!-- Filter toolbar -->
+    <div id="filter-toolbar">
+      <button class="filter-btn active" data-filter="findings">Findings</button>
+      <button class="filter-btn" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="thinking">Thinking</button>
+      <button class="filter-btn" data-filter="tools">Tools</button>
+    </div>
+
+    <!-- Event log -->
+    <div id="event-log">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">🔍</div>
+        <div>Submit code to start the multi-agent review</div>
+      </div>
+    </div>
+
+    <!-- Approval prompt -->
+    <div id="approval-box">
+      <div id="approval-summary">
+        ⚠️ <span id="approval-summary-text">Specialists finished — review findings before the Lead agent decides.</span>
+      </div>
+      <div id="findings-panel"></div>
+      <div id="approval-actions">
+        <button id="approve-btn">Approve</button>
+        <button id="block-btn">Block</button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- Verdict modal overlay -->
+<div id="verdict-overlay">
+  <div id="verdict-modal">
+    <div id="verdict-modal-header">
+      <div class="verdict-badge">
+        <span class="verdict-modal-icon" id="verdict-modal-icon"></span>
+        <span class="verdict-decision" id="verdict-modal-label"></span>
+      </div>
+      <div class="verdict-meta" id="verdict-modal-meta"></div>
+    </div>
+    <div id="verdict-modal-body">
+      <ul id="verdict-bullets"></ul>
+    </div>
+    <div id="verdict-modal-actions">
+      <button id="verdict-copy-btn">Copy verdict</button>
+      <button id="verdict-dismiss-btn">Review again</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SAMPLE = `function authenticate(username, password) {
+  const query = \`SELECT * FROM users WHERE username='\${username}' AND password='\${password}'\`;
+  const result = db.execute(query);
+  eval(result.callback);
+  return result;
+}
+
+function fetchUserData(userId) {
+  const users = db.query("SELECT * FROM users");
+  for (const user of users) {
+    if (user.id == userId) {
+      return user;
+    }
+  }
+}`;
+
+  const VULN_PATTERNS = [
+    {
+      test: (l) => /\beval\s*\(/.test(l),
+      severity: 'critical', label: 'RCE via eval',
+      tip: 'eval() executes arbitrary code — never use with user-controlled input'
+    },
+    {
+      test: (l) => /`[^`]*SELECT/i.test(l) || (/SELECT/i.test(l) && /\$\{/.test(l)),
+      severity: 'critical', label: 'SQL Injection',
+      tip: 'User input interpolated directly into SQL — use parameterized queries'
+    },
+    {
+      test: (l) => /SELECT \* FROM/i.test(l) && !/`/.test(l),
+      severity: 'warning', label: 'Full Table Scan',
+      tip: 'Fetches ALL rows — filter in the database with WHERE, not in JS'
+    },
+    {
+      test: (l) => /[^=!<>]==[^=]/.test(l),
+      severity: 'info', label: 'Loose Equality',
+      tip: 'Use === for strict comparison to avoid type coercion'
+    }
+  ];
+
+  // ── Syntax highlighter ──
+  function highlightSyntax(text) {
+    // HTML-escape first
+    let s = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Comments (must come before string matching to avoid coloring inside strings)
+    s = s.replace(/(\/\/[^\n]*)$/, '<span class="hl-comment">$1</span>');
+    // Template literals, double-quoted, single-quoted strings
+    s = s.replace(/(`[^`]*`|"[^"]*"|'[^']*')/g, '<span class="hl-string">$1</span>');
+    // Keywords (skip if already inside a span)
+    s = s.replace(/\b(function|const|let|var|return|for|of|in|if|else|async|await|new|typeof|true|false|null|undefined|class|import|export|from|try|catch|throw)\b/g,
+      (m) => `<span class="hl-keyword">${m}</span>`);
+    // Numbers
+    s = s.replace(/\b(\d+)\b/g, '<span class="hl-number">$1</span>');
+    return s;
+  }
+
+  // ── Code rendering ──
+  function renderLines(container, lines, withGutter) {
+    container.innerHTML = '';
+    lines.forEach((line, i) => {
+      const div = document.createElement('div');
+      div.className = 'code-line';
+      div.dataset.line = i + 1;
+
+      const num = document.createElement('span');
+      num.className = 'line-num';
+      num.textContent = i + 1;
+      div.appendChild(num);
+
+      if (withGutter) {
+        const g = document.createElement('span');
+        g.className = 'line-gutter';
+        g.textContent = ' ';
+        div.appendChild(g);
+      }
+
+      const content = document.createElement('span');
+      content.className = 'line-content';
+      content.innerHTML = highlightSyntax(line || ' ');
+      div.appendChild(content);
+
+      container.appendChild(div);
+    });
+  }
+
+  function renderCodeView(code) {
+    const before = document.getElementById('code-before');
+    renderLines(before, code.split('\n'), false);
+  }
+
+  function annotateCodeView(code) {
+    const before = document.getElementById('code-before');
+    const lineEls = before.querySelectorAll('.code-line');
+    code.split('\n').forEach((line, i) => {
+      for (const p of VULN_PATTERNS) {
+        if (p.test(line)) {
+          lineEls[i].classList.add('line-' + p.severity);
+          const badge = document.createElement('span');
+          badge.className = `line-badge sev-${p.severity}`;
+          badge.textContent = p.label;
+          badge.title = p.tip;
+          lineEls[i].appendChild(badge);
+          break;
+        }
+      }
+    });
+  }
+
+  function showDiffView(originalCode, fixCode) {
+    const codeViewEl = document.getElementById('code-view');
+    const before = document.getElementById('code-before');
+    const origLines = originalCode.split('\n');
+    const fixLines  = fixCode.split('\n');
+
+    // Add "ORIGINAL" sticky header inside before-pane
+    const beforeHeader = document.createElement('div');
+    beforeHeader.className = 'code-pane-header';
+    beforeHeader.textContent = 'ORIGINAL';
+    before.prepend(beforeHeader);
+
+    // Mark changed lines in before-pane
+    const beforeLineEls = before.querySelectorAll('.code-line');
+    origLines.forEach((origLine, i) => {
+      const fixLine = fixLines[i] !== undefined ? fixLines[i] : null;
+      if (fixLine !== null && origLine !== fixLine && beforeLineEls[i]) {
+        beforeLineEls[i].classList.add('line-removed');
+        // Insert gutter marker after line-num
+        const g = document.createElement('span');
+        g.className = 'line-gutter';
+        g.textContent = '−';
+        g.style.color = '#f85149';
+        const numEl = beforeLineEls[i].querySelector('.line-num');
+        if (numEl && numEl.nextSibling) {
+          beforeLineEls[i].insertBefore(g, numEl.nextSibling);
+        } else {
+          beforeLineEls[i].appendChild(g);
+        }
+      }
+    });
+
+    // Build after-pane
+    const after = document.createElement('div');
+    after.className = 'code-pane';
+    after.id = 'code-after';
+
+    const afterHeader = document.createElement('div');
+    afterHeader.className = 'code-pane-header';
+    afterHeader.textContent = 'SUGGESTED FIX';
+    after.appendChild(afterHeader);
+
+    const maxLines = Math.max(origLines.length, fixLines.length);
+    for (let i = 0; i < maxLines; i++) {
+      const origLine = origLines[i] !== undefined ? origLines[i] : '';
+      const fixLine  = fixLines[i]  !== undefined ? fixLines[i]  : '';
+      const changed  = origLine !== fixLine;
+
+      const div = document.createElement('div');
+      div.className = 'code-line' + (changed ? ' line-added' : '');
+      div.dataset.line = i + 1;
+
+      const num = document.createElement('span');
+      num.className = 'line-num';
+      num.textContent = i + 1;
+      div.appendChild(num);
+
+      const g = document.createElement('span');
+      g.className = 'line-gutter';
+      g.textContent = changed ? '+' : ' ';
+      if (changed) g.style.color = '#3fb950';
+      div.appendChild(g);
+
+      const content = document.createElement('span');
+      content.className = 'line-content' + (changed ? '' : ' dimmed');
+      content.innerHTML = highlightSyntax(fixLine || ' ');
+      div.appendChild(content);
+
+      after.appendChild(div);
+    }
+
+    // Switch layout to row, append after-pane
+    codeViewEl.style.flexDirection = 'row';
+    codeViewEl.appendChild(after);
+
+    // Sync scroll between panes
+    let syncing = false;
+    before.addEventListener('scroll', () => {
+      if (syncing) return;
+      syncing = true;
+      after.scrollTop = before.scrollTop;
+      syncing = false;
+    });
+    after.addEventListener('scroll', () => {
+      if (syncing) return;
+      syncing = true;
+      before.scrollTop = after.scrollTop;
+      syncing = false;
+    });
+
+    // Trigger slide-in animation
+    requestAnimationFrame(() => after.classList.add('visible'));
+  }
+
+  // ── DOM refs ──
+  const codeInput      = document.getElementById('code-input');
+  const reviewBtn      = document.getElementById('review-btn');
+  const sampleBtn      = document.getElementById('sample-btn');
+  const clearBtn       = document.getElementById('clear-btn');
+  const eventLog       = document.getElementById('event-log');
+  const codeViewEl     = document.getElementById('code-view');
+  const approvalBox    = document.getElementById('approval-box');
+  const findingsPanel  = document.getElementById('findings-panel');
+  const approvalSumText = document.getElementById('approval-summary-text');
+  const approveBtn     = document.getElementById('approve-btn');
+  const blockBtn       = document.getElementById('block-btn');
+  const verdictOverlay = document.getElementById('verdict-overlay');
+  const wsDot          = document.getElementById('ws-dot');
+  const wsLabel        = document.getElementById('ws-label');
+  const panelLabel     = document.getElementById('code-panel-label');
+  const panelLabelText = document.getElementById('panel-label-text');
+  const severityChips  = document.getElementById('severity-chips');
+  const chipCritical   = document.getElementById('chip-critical');
+  const chipWarning    = document.getElementById('chip-warning');
+  const chipInfo       = document.getElementById('chip-info');
+  const legendBar      = document.getElementById('legend-bar');
+  const legendCritical = document.getElementById('legend-critical');
+  const legendWarning  = document.getElementById('legend-warning');
+  const legendInfo     = document.getElementById('legend-info');
+  const copyFixBtn     = document.getElementById('copy-fix-btn');
+
+  // ── State ──
+  let agentState      = { orchestrator: 'idle', dev: 'idle', security: 'idle', perf: 'idle', lead: 'idle' };
+  let agentStartTimes = {};
+  let agentTimers     = {};
+  let reviewing       = false;
+  let currentFilter   = 'findings';
+  let findingSections = new Set();
+  let counts          = { critical: 0, warning: 0, info: 0 };
+  let currentFixCode  = null;
+  let fullVerdictText = '';
+
+  // ── Filter visibility map ──
+  const FILTER_CATS = {
+    all:      ['system', 'thinking', 'tool', 'finding', 'section'],
+    findings: ['finding', 'section'],
+    thinking: ['thinking'],
+    tools:    ['tool'],
+  };
+
+  // ── WebSocket ──
+  function connectWS() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+
+    ws.onopen = () => {
+      wsDot.className = 'ws-dot connected';
+      wsLabel.textContent = 'Connected';
+      reviewBtn.disabled = false;
+    };
+
+    ws.onclose = () => {
+      wsDot.className = 'ws-dot';
+      wsLabel.textContent = 'Disconnected — reconnecting…';
+      reviewBtn.disabled = true;
+      setTimeout(connectWS, 2000);
+    };
+
+    ws.onerror = () => ws.close();
+
+    ws.onmessage = (e) => {
+      try { handleEvent(JSON.parse(e.data)); } catch {}
+    };
+
+    window._ws = ws;
+  }
+
+  // ── Event handler ──
+  function handleEvent(ev) {
+    const { type, agent, message, severity, fix } = ev;
+
+    if (type === 'agent.start') {
+      if (agent === 'lead') {
+        setAgentState('orchestrator', 'done');
+        ['dev', 'security', 'perf'].forEach(a => {
+          if (agentState[a] !== 'idle') setAgentState(a, 'done');
+        });
+      }
+      setAgentState(agent, 'active');
+
+    } else if (type === 'agent.thinking' || type === 'tool.start' || type === 'tool.end') {
+      if (agentState[agent] === 'idle') setAgentState(agent, 'active');
+
+    } else if (type === 'agent.handoff') {
+      const target = detectHandoffTarget(message);
+      if (target && agentState[target] === 'idle') setAgentState(target, 'active');
+
+    } else if (type === 'finding') {
+      if (severity && counts[severity] !== undefined) {
+        counts[severity]++;
+        updateSeverityChips();
+      }
+
+    } else if (type === 'human_approval') {
+      const origCode = codeInput.value;
+      annotateCodeView(origCode);
+
+      if (fix) {
+        currentFixCode = fix;
+        showDiffView(origCode, fix);
+        legendBar.classList.add('visible');
+        updateLegend();
+      }
+
+      panelLabelText.textContent = 'Findings';
+      panelLabel.classList.remove('reviewing');
+
+      const c = counts.critical;
+      if (c > 0) {
+        approvalSumText.textContent =
+          `${c} critical issue${c > 1 ? 's' : ''} found — approve anyway or block this PR?`;
+      } else {
+        approvalSumText.textContent = 'Specialists finished — review findings before the Lead agent decides.';
+      }
+      findingsPanel.textContent = message || 'No findings summary available.';
+      approvalBox.classList.add('visible');
+      appendLog(ev);
+      return;
+
+    } else if (type === 'verdict') {
+      Object.keys(agentState).forEach(k => setAgentState(k, 'done'));
+      approvalBox.classList.remove('visible');
+      showVerdict(message, severity);
+      reviewing = false;
+      wsDot.className = 'ws-dot connected';
+      wsLabel.textContent = 'Connected';
+      reviewBtn.disabled = false;
+      return; // verdict is shown in modal, not log
+    }
+
+    appendLog(ev);
+  }
+
+  function detectHandoffTarget(msg) {
+    const m = (msg || '').toLowerCase();
+    if (m.includes('dev')) return 'dev';
+    if (m.includes('security')) return 'security';
+    if (m.includes('perf')) return 'perf';
+    return null;
+  }
+
+  // ── Pipeline state management ──
+  const STATE_ICONS = { idle: '○', active: '◌', done: '✓', error: '✕' };
+
+  function setAgentState(agent, state) {
+    agentState[agent] = state;
+    const card    = document.querySelector(`[data-agent="${agent}"]`);
+    const iconEl  = document.getElementById('icon-' + agent);
+    const elapsed = document.getElementById('elapsed-' + agent);
+    if (!card) return;
+
+    card.className = 'agent-card' + (state !== 'idle' ? ' ' + state : '');
+    if (iconEl) iconEl.textContent = STATE_ICONS[state] || '○';
+
+    if (state === 'active') {
+      agentStartTimes[agent] = Date.now();
+      clearInterval(agentTimers[agent]);
+      agentTimers[agent] = setInterval(() => {
+        const secs = Math.floor((Date.now() - agentStartTimes[agent]) / 1000);
+        if (elapsed) elapsed.textContent = secs + 's';
+      }, 1000);
+    } else if (state === 'done' || state === 'error') {
+      clearInterval(agentTimers[agent]);
+      if (agentStartTimes[agent] && elapsed) {
+        const secs = Math.floor((Date.now() - agentStartTimes[agent]) / 1000);
+        elapsed.textContent = secs + 's';
+      }
+    } else {
+      clearInterval(agentTimers[agent]);
+      if (elapsed) elapsed.textContent = '';
+    }
+  }
+
+  // ── Severity chips + legend ──
+  function updateSeverityChips() {
+    severityChips.style.display = 'flex';
+    const update = (el, count, label) => {
+      if (count > 0) { el.style.display = ''; el.textContent = count + ' ' + label; }
+      else el.style.display = 'none';
+    };
+    update(chipCritical, counts.critical, 'critical');
+    update(chipWarning,  counts.warning,  'warning');
+    update(chipInfo,     counts.info,     'info');
+  }
+
+  function updateLegend() {
+    legendCritical.textContent = counts.critical + ' critical';
+    legendWarning.textContent  = counts.warning  + ' warning';
+    legendInfo.textContent     = counts.info     + ' info';
+  }
+
+  // ── Filter toolbar ──
+  function applyFilter(filter) {
+    currentFilter = filter;
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.filter === filter);
+    });
+    const visible = FILTER_CATS[filter] || FILTER_CATS.all;
+    document.querySelectorAll('#event-log > [data-category]').forEach(el => {
+      el.style.display = visible.includes(el.dataset.category) ? '' : 'none';
+    });
+  }
+
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => applyFilter(btn.dataset.filter));
+  });
+
+  // ── Log renderer ──
+  function appendLog(ev) {
+    const emptyState = document.getElementById('empty-state');
+    if (emptyState) emptyState.remove();
+
+    const { type, agent, message, severity, timestamp } = ev;
+
+    // Finding events → full card with section header
+    if (type === 'finding') {
+      if (!findingSections.has(agent)) {
+        findingSections.add(agent);
+        const hdr = document.createElement('div');
+        hdr.className = 'findings-section-header';
+        hdr.dataset.category = 'section';
+        hdr.innerHTML = `
+          <div class="findings-section-line"></div>
+          <div class="findings-section-label">${agentFullLabel(agent)} Agent</div>
+          <div class="findings-section-line"></div>
+        `;
+        eventLog.appendChild(hdr);
+        applyVisibility(hdr);
+      }
+
+      const card = document.createElement('div');
+      card.className = `finding-card sev-${severity || 'info'}`;
+      card.dataset.category = 'finding';
+
+      // Extract title: first clause before period, colon, or newline
+      const titleMatch = message.match(/^([^.\n:]{4,80})/);
+      const title = titleMatch ? titleMatch[1].trim() : 'Finding';
+      const body  = message.slice(title.length).replace(/^[.:\s]+/, '').trim();
+
+      card.innerHTML = `
+        <div class="finding-card-header">
+          <span class="ev-agent-badge badge-${agent}">${agentLabel(agent)}</span>
+          <span class="severity-badge sev-${severity || 'info'}">${severity || 'info'}</span>
+          <span class="finding-title">${escapeHtml(title)}</span>
+        </div>
+        ${body ? `<div class="finding-card-body">${escapeHtml(body)}</div>` : ''}
+      `;
+      eventLog.appendChild(card);
+      applyVisibility(card);
+      eventLog.scrollTop = eventLog.scrollHeight;
+      return;
+    }
+
+    // Standard row
+    const row = document.createElement('div');
+    row.className = 'event-row';
+
+    if (type === 'agent.thinking') row.dataset.category = 'thinking';
+    else if (type === 'tool.start' || type === 'tool.end') row.dataset.category = 'tool';
+    else row.dataset.category = 'system';
+
+    const noisy = ['tool.start','tool.end','agent.start','agent.thinking','agent.handoff'].includes(type);
+    if (noisy) row.classList.add('noise');
+
+    const time = new Date(timestamp || Date.now());
+    const hh = String(time.getHours()).padStart(2,'0');
+    const mm = String(time.getMinutes()).padStart(2,'0');
+    const ss = String(time.getSeconds()).padStart(2,'0');
+
+    const isThinking = type === 'agent.thinking';
+    const isLong = message.length > 120;
+    const msgClass = (isThinking ? 'ev-message dimmed' : 'ev-message') + (isLong ? ' collapsible' : '');
+
+    row.innerHTML = `
+      <span class="ev-time">${hh}:${mm}:${ss}</span>
+      <span class="ev-agent-badge badge-${agent}">${agentLabel(agent)}</span>
+      <span class="ev-type-badge ${typeClass(type)}">${typeDisplay(type)}</span>
+      <span class="${msgClass}">${escapeHtml(message)}</span>
+    `;
+
+    if (isLong) {
+      const msgEl = row.querySelector('.ev-message');
+      msgEl.addEventListener('click', () => msgEl.classList.toggle('expanded'));
+      msgEl.title = 'Click to expand';
+    }
+
+    eventLog.appendChild(row);
+    applyVisibility(row);
+    eventLog.scrollTop = eventLog.scrollHeight;
+  }
+
+  function applyVisibility(el) {
+    const visible = FILTER_CATS[currentFilter] || FILTER_CATS.all;
+    if (!visible.includes(el.dataset.category)) el.style.display = 'none';
+  }
+
+  function agentLabel(agent) {
+    return { orchestrator: 'Orch', dev: 'Dev', security: 'Sec', perf: 'Perf', lead: 'Lead' }[agent] ?? agent;
+  }
+
+  function agentFullLabel(agent) {
+    return { orchestrator: 'Orchestrator', dev: 'Dev', security: 'Security', perf: 'Performance', lead: 'Lead' }[agent] ?? agent;
+  }
+
+  function typeClass(type) {
+    return {
+      'agent.start':    'type-agent-start',
+      'agent.thinking': 'type-agent-thinking',
+      'agent.handoff':  'type-agent-handoff',
+      'tool.start':     'type-tool-start',
+      'tool.end':       'type-tool-end',
+      'finding':        'type-finding',
+      'human_approval': 'type-human-approval',
+    }[type] || '';
+  }
+
+  function typeDisplay(type) {
+    return {
+      'agent.start':    'start',
+      'agent.thinking': 'thinking',
+      'agent.handoff':  'handoff',
+      'tool.start':     'tool ▶',
+      'tool.end':       'tool ■',
+      'finding':        'finding',
+      'human_approval': 'approval',
+    }[type] ?? type;
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
+
+  // ── Verdict modal ──
+  function showVerdict(message, severity) {
+    fullVerdictText = message;
+
+    const header = document.getElementById('verdict-modal-header');
+    const icon   = document.getElementById('verdict-modal-icon');
+    const label  = document.getElementById('verdict-modal-label');
+    const meta   = document.getElementById('verdict-modal-meta');
+    const bullets = document.getElementById('verdict-bullets');
+
+    let cls = 'v-approved', iconText = '✅', labelText = 'APPROVED';
+    if (severity === 'critical' || message.includes('BLOCKED')) {
+      cls = 'v-blocked'; iconText = '🚫'; labelText = 'BLOCKED';
+    } else if (severity === 'warning' || message.includes('CHANGES_REQUESTED')) {
+      cls = 'v-changes'; iconText = '⚠️'; labelText = 'CHANGES REQUESTED';
+    }
+
+    header.className = cls;
+    icon.textContent  = iconText;
+    label.textContent = labelText;
+    meta.textContent  = `Lead Reviewer · ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' })}`;
+
+    bullets.innerHTML = '';
+    message.split(/\n+/).filter(l => l.trim()).forEach(line => {
+      const li = document.createElement('li');
+      li.textContent = line.trim().replace(/^[-•●*]\s*/, '');
+      bullets.appendChild(li);
+    });
+
+    verdictOverlay.classList.add('visible');
+  }
+
+  verdictOverlay.addEventListener('click', (e) => {
+    if (e.target === verdictOverlay) verdictOverlay.classList.remove('visible');
+  });
+  document.getElementById('verdict-dismiss-btn').addEventListener('click', () => {
+    verdictOverlay.classList.remove('visible');
+  });
+  document.getElementById('verdict-copy-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(fullVerdictText).catch(() => {});
+  });
+
+  copyFixBtn.addEventListener('click', () => {
+    if (currentFixCode) navigator.clipboard.writeText(currentFixCode).catch(() => {});
+  });
+
+  // ── Review submit ──
+  reviewBtn.addEventListener('click', async () => {
+    const code = codeInput.value.trim();
+    if (!code) return;
+
+    resetUI();
+    reviewing = true;
+    wsDot.className = 'ws-dot reviewing';
+    wsLabel.textContent = 'Reviewing…';
+    reviewBtn.disabled = true;
+    panelLabelText.textContent = 'Reviewing…';
+    panelLabel.classList.add('reviewing');
+
+    renderCodeView(code);
+    codeInput.style.display = 'none';
+    codeViewEl.style.display = 'flex';
+    codeViewEl.style.flexDirection = 'column';
+
+    await fetch('/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+  });
+
+  function resetUI() {
+    eventLog.innerHTML = '';
+    Object.keys(agentState).forEach(k => setAgentState(k, 'idle'));
+
+    codeViewEl.style.display = 'none';
+    codeViewEl.style.flexDirection = '';
+    codeInput.style.display = '';
+
+    approvalBox.classList.remove('visible');
+    findingsPanel.textContent = '';
+    verdictOverlay.classList.remove('visible');
+    legendBar.classList.remove('visible');
+    severityChips.style.display = 'none';
+
+    counts = { critical: 0, warning: 0, info: 0 };
+    findingSections.clear();
+    currentFixCode = null;
+    fullVerdictText = '';
+
+    panelLabelText.textContent = 'Code to review';
+    panelLabel.classList.remove('reviewing');
+
+    const codeBefore = document.getElementById('code-before');
+    if (codeBefore) codeBefore.innerHTML = '';
+    const codeAfter = document.getElementById('code-after');
+    if (codeAfter) codeAfter.remove();
+
+    applyFilter('findings');
+  }
+
+  // ── Approval ──
+  approveBtn.addEventListener('click', () => sendApproval(true));
+  blockBtn.addEventListener('click',   () => sendApproval(false));
+
+  async function sendApproval(approved) {
+    approveBtn.disabled = true;
+    blockBtn.disabled   = true;
+    await fetch('/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved }),
+    });
+    approvalBox.classList.remove('visible');
+    approveBtn.disabled = false;
+    blockBtn.disabled   = false;
+  }
+
+  // ── Sample / clear ──
+  sampleBtn.addEventListener('click', () => { codeInput.value = SAMPLE; });
+  clearBtn.addEventListener('click',  () => { codeInput.value = ''; resetUI(); });
+
+  // ── Boot ──
+  connectWS();
+</script>
+</body>
+</html>
