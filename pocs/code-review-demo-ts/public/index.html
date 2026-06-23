@@ -602,6 +602,48 @@
     .sev-warning  { background: rgba(210,153,34,0.2); color: #d29922; border: 1px solid rgba(210,153,34,0.3); }
     .sev-info     { background: rgba(88,166,255,0.2); color: #58a6ff; border: 1px solid rgba(88,166,255,0.3); }
 
+    /* ── Verdict bar ── */
+    #verdict-box {
+      flex-shrink: 0;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-top: 3px solid var(--border);
+      font-size: 0.82rem;
+    }
+    #verdict-box.visible { display: flex; }
+    #verdict-box.v-blocked  { border-top-color: #f85149; background: rgba(248,81,73,0.05); }
+    #verdict-box.v-approved { border-top-color: #3fb950; background: rgba(63,185,80,0.05); }
+    #verdict-box.v-changes  { border-top-color: #d29922; background: rgba(210,153,34,0.05); }
+
+    #verdict-label {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+    .v-blocked  #verdict-label { color: #f85149; }
+    .v-approved #verdict-label { color: #3fb950; }
+    .v-changes  #verdict-label { color: #d29922; }
+
+    #verdict-text {
+      color: var(--text-dim);
+      font-size: 0.78rem;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    #verdict-box:hover { cursor: pointer; filter: brightness(1.08); }
+
+    /* ── Event log divider ── */
+    .ev-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+      flex-shrink: 0;
+    }
+
     /* ── Approval box ── */
     #approval-box {
       flex-shrink: 0;
@@ -866,8 +908,8 @@
 
     <!-- Filter toolbar -->
     <div id="filter-toolbar">
-      <button class="filter-btn active" data-filter="findings">Findings</button>
-      <button class="filter-btn" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="findings">Findings</button>
+      <button class="filter-btn active" data-filter="all">All</button>
       <button class="filter-btn" data-filter="thinking">Thinking</button>
       <button class="filter-btn" data-filter="tools">Tools</button>
     </div>
@@ -890,6 +932,12 @@
         <button id="approve-btn">Approve</button>
         <button id="block-btn">Block</button>
       </div>
+    </div>
+
+    <!-- Verdict bar -->
+    <div id="verdict-box">
+      <span id="verdict-label"></span>
+      <span id="verdict-text"></span>
     </div>
 
   </div>
@@ -1153,7 +1201,7 @@ function fetchUserData(userId) {
   let agentStartTimes = {};
   let agentTimers     = {};
   let reviewing       = false;
-  let currentFilter   = 'findings';
+  let currentFilter   = 'all';
   let findingSections = new Set();
   let counts          = { critical: 0, warning: 0, info: 0 };
   let currentFixCode  = null;
@@ -1253,7 +1301,11 @@ function fetchUserData(userId) {
       wsDot.className = 'ws-dot connected';
       wsLabel.textContent = 'Connected';
       reviewBtn.disabled = false;
-      return; // verdict is shown in modal, not log
+      // Restore code input so the user can submit another review
+      codeInput.style.display = '';
+      codeViewEl.style.display = 'none';
+      codeViewEl.style.flexDirection = '';
+      return; // verdict is shown in modal + bar, not log
     }
 
     appendLog(ev);
@@ -1379,6 +1431,15 @@ function fetchUserData(userId) {
       return;
     }
 
+    // Agent start gets a visual divider
+    if (type === 'agent.start') {
+      const divider = document.createElement('div');
+      divider.className = 'ev-divider';
+      divider.dataset.category = 'system';
+      eventLog.appendChild(divider);
+      applyVisibility(divider);
+    }
+
     // Standard row
     const row = document.createElement('div');
     row.className = 'event-row';
@@ -1461,7 +1522,7 @@ function fetchUserData(userId) {
       .replace(/>/g,'&gt;');
   }
 
-  // ── Verdict modal ──
+  // ── Verdict modal + bar ──
   function showVerdict(message, severity) {
     fullVerdictText = message;
 
@@ -1490,8 +1551,17 @@ function fetchUserData(userId) {
       bullets.appendChild(li);
     });
 
-    verdictOverlay.classList.add('visible');
+    // Populate the verdict bar (bar is always shown; modal opens on click)
+    const verdictBox = document.getElementById('verdict-box');
+    verdictBox.className = cls + ' visible';
+    document.getElementById('verdict-label').textContent = labelText;
+    const truncated = message.length > 200 ? message.slice(0, 200) + '…' : message;
+    document.getElementById('verdict-text').textContent = truncated;
   }
+
+  document.getElementById('verdict-box').addEventListener('click', () => {
+    verdictOverlay.classList.add('visible');
+  });
 
   verdictOverlay.addEventListener('click', (e) => {
     if (e.target === verdictOverlay) verdictOverlay.classList.remove('visible');
@@ -1543,6 +1613,7 @@ function fetchUserData(userId) {
     approvalBox.classList.remove('visible');
     findingsPanel.textContent = '';
     verdictOverlay.classList.remove('visible');
+    document.getElementById('verdict-box').className = '';
     legendBar.classList.remove('visible');
     severityChips.style.display = 'none';
 
@@ -1559,7 +1630,7 @@ function fetchUserData(userId) {
     const codeAfter = document.getElementById('code-after');
     if (codeAfter) codeAfter.remove();
 
-    applyFilter('findings');
+    applyFilter('all');
   }
 
   // ── Approval ──
