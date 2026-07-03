@@ -4,7 +4,9 @@ import { UnconstrainedMemory } from "beeai-framework/memory/unconstrainedMemory"
 import { Tool } from "beeai-framework/tools/base";
 import { HandoffTool } from "beeai-framework/tools/handoff";
 import { ThinkTool } from "beeai-framework/tools/think";
+
 import { getLLM } from "../core/backend.js";
+
 import { createDevAgent } from "./devAgent.js";
 import { createSecurityAgent } from "./securityAgent.js";
 import { createPerfAgent } from "./perfAgent.js";
@@ -34,9 +36,9 @@ export async function createOrchestrator() {
         }),
       ],
       instructions:
-        "You are the code review orchestrator. You MUST delegate the submitted code to ALL THREE specialist agents " +
-        "(DevReview, SecurityReview, PerfReview) and collect their findings. " +
-        "Once all three have reported back, return a consolidated summary of all findings.",
+        `You are the code review orchestrator. You MUST delegate the submitted code to ALL THREE specialist agents 
+        (DevReview, SecurityReview, PerfReview) and collect their findings. 
+        Once all three have reported back, return a consolidated summary of all findings.`,
       middlewares: [new GlobalTrajectoryMiddleware({ included: [Tool] })],
     }),
     devAgent,
